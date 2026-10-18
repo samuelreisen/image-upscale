@@ -1,0 +1,109 @@
+{
+  "name": "image-upscale",
+  "productName": "ImageUpscale",
+  "version": "1.0.0",
+  "description": "On-device image upscaler. Nothing leaves your machine.",
+  "author": "Sam Reisen",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/",
+    "icons": "node scripts/make-icons.js",
+    "models": "node scripts/fetch-models.js",
+    "dist:win": "electron-builder --win --x64 --arm64 --publish never",
+    "dist:mac": "electron-builder --mac --universal -c.mac.identity=- --publish never"
+  },
+  "build": {
+    "appId": "com.samuelreisen.imageupscale",
+    "productName": "ImageUpscale",
+    "copyright": "Copyright (c) 2026 Sam Reisen",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/**/*"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "renderer/**/*",
+      "scripts/markpack.js",
+      "scripts/install-mark.js",
+      "scripts/mark.config.json",
+      "build/icon.png",
+      "HANDOFF.md",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "models/fast.onnx",
+        "to": "models/fast.onnx"
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "upscl",
+        "name": "ImageUpscale update file",
+        "role": "Editor"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ImageUpscale",
+      "buildUniversalInstaller": false,
+      "artifactName": "ImageUpscale-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "ImageUpscale-Portable-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.graphics-design",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "artifactName": "ImageUpscale-${version}-universal.${ext}"
+    }
+  }
+}
