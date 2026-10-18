@@ -83,4 +83,22 @@ class Blender {
   }
 }
 
-module.exports = { planTiles, edgeWeight, Blender };
+// Halves a planar CHW float image (3 x h x w, w and h even) by averaging 2x2 blocks.
+function boxDown2(data, w, h) {
+  const ow = w >> 1;
+  const oh = h >> 1;
+  const out = new Float32Array(3 * ow * oh);
+  for (let c = 0; c < 3; c++) {
+    const plane = c * w * h;
+    const oplane = c * ow * oh;
+    for (let y = 0; y < oh; y++) {
+      for (let x = 0; x < ow; x++) {
+        const i = plane + 2 * y * w + 2 * x;
+        out[oplane + y * ow + x] = (data[i] + data[i + 1] + data[i + w] + data[i + w + 1]) / 4;
+      }
+    }
+  }
+  return out;
+}
+
+module.exports = { planTiles, edgeWeight, Blender, boxDown2 };

@@ -13,7 +13,17 @@
     "icons": "node scripts/make-icons.js",
     "models": "node scripts/fetch-models.js",
     "dist:win": "electron-builder --win --x64 --arm64 --publish never",
-    "dist:mac": "electron-builder --mac --universal -c.mac.identity=- --publish never"
+    "dist:mac": "electron-builder --mac --universal -c.mac.identity=- --publish never",
+    "bench": "node scripts/bench.js",
+    "mark": "node scripts/make-mark.js",
+    "verify:marks": "node scripts/verify-mark-system.js",
+    "predist:win": "node scripts/cross-deps.js win && node scripts/fetch-models.js fast",
+    "predist:mac": "node scripts/cross-deps.js mac && node scripts/fetch-models.js fast",
+    "deps:cross": "node scripts/cross-deps.js all",
+    "predist:dir": "node scripts/fetch-models.js fast",
+    "dist:dir": "electron-builder --linux dir --x64 --publish never",
+    "dist:win:portable": "electron-builder --win portable --x64 --arm64 --publish never -c.win.signAndEditExecutable=false -c.win.target=portable",
+    "predist:win:portable": "node scripts/cross-deps.js win && node scripts/fetch-models.js fast"
   },
   "build": {
     "appId": "com.samuelreisen.imageupscale",
@@ -21,7 +31,9 @@
     "copyright": "Copyright (c) 2026 Sam Reisen",
     "asar": true,
     "asarUnpack": [
-      "node_modules/onnxruntime-node/**/*"
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*"
     ],
     "directories": {
       "output": "release",
@@ -35,6 +47,7 @@
       "scripts/mark.config.json",
       "build/icon.png",
       "HANDOFF.md",
+      "mark.json",
       "package.json"
     ],
     "extraResources": [
@@ -104,6 +117,26 @@
         }
       ],
       "artifactName": "ImageUpscale-${version}-universal.${ext}"
+    },
+    "afterPack": "scripts/after-pack.js",
+    "electronLanguages": [
+      "en-US"
+    ],
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Graphics",
+      "target": [
+        "dir"
+      ]
     }
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "png2icons": "^2.0.1"
+  },
+  "dependencies": {
+    "onnxruntime-node": "1.23.2",
+    "sharp": "^0.35.5"
   }
 }

@@ -1,0 +1,14 @@
+[
+  {
+    "mark": 1,
+    "name": "Mk I",
+    "title": "First release",
+    "notes": "Initial interface and handoff",
+    "created": "2026-10-18T16:20:14.582Z",
+    "file": "marks/out/ImageUpscale-MkI.upscl",
+    "sha256": "605bf51d0e5db58d4c0da0ba49b875a8f1ec27b73831af77d676ae1fa5563908",
+    "bytes": 22268,
+    "minShell": "1.0.0",
+    "handoff": true
+  }
+]

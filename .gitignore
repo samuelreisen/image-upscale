@@ -1,0 +1,6 @@
+node_modules/
+release/
+models/*.onnx
+.scratch/
+*.log
+.DS_Store

@@ -41,3 +41,26 @@ test('blending identical tiles of a gradient leaves no seams', () => {
         maxErr = Math.max(maxErr, Math.abs(out[(Y * W * S + X) * 3 + c] - Math.round(val(X, Y, c) * 255)));
   assert.ok(maxErr <= 1, `max error ${maxErr}`);
 });
+
+test('boxDown2 averages 2x2 blocks per channel', () => {
+  const { boxDown2 } = require('../electron/tile');
+  const w = 4, h = 2, d = new Float32Array(3 * w * h);
+  for (let c = 0; c < 3; c++) for (let i = 0; i < w * h; i++) d[c * w * h + i] = c + (i % 2);
+  const o = boxDown2(d, w, h);
+  assert.equal(o.length, 3 * 2 * 1);
+  assert.deepEqual(Array.from(o), [0.5, 0.5, 1.5, 1.5, 2.5, 2.5]);
+});
+
+test('model verification accepts the exact file and rejects a changed byte', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path'), crypto = require('crypto');
+  const { isVerified } = require('../electron/models');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'upscl-m-'));
+  const data = Buffer.from('pretend model bytes');
+  const model = { size: data.length, sha256: crypto.createHash('sha256').update(data).digest('hex') };
+  const f = path.join(dir, 'm.onnx');
+  fs.writeFileSync(f, data);
+  assert.equal(await isVerified(model, f), true);
+  data[3] ^= 1; fs.writeFileSync(f, data);
+  assert.equal(await isVerified(model, f), false);
+  assert.equal(await isVerified(model, path.join(dir, 'missing.onnx')), false);
+});

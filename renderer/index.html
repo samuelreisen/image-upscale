@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ImageUpscale</title>
+  <link rel="stylesheet" href="assets/hig-tokens.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Queue">
+      <div class="sidebar-head">
+        <h2>Queue</h2>
+        <button id="add" class="icon-btn" aria-label="Add Images" title="Add Images (⌘O / Ctrl+O)">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+        </button>
+      </div>
+      <ul id="queue" class="queue" role="listbox" aria-label="Images to upscale"></ul>
+      <p id="queue-empty" class="hint">Images you add appear here.</p>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar hig-glass" id="toolbar">
+        <div class="tb-lead"><button id="cancel" class="btn" hidden>Cancel</button></div>
+        <div class="tb-mid">
+          <div class="seg" role="radiogroup" aria-label="Scale">
+            <button role="radio" data-scale="2" aria-checked="false">2×</button>
+            <button role="radio" data-scale="4" aria-checked="true">4×</button>
+          </div>
+          <div class="seg" role="radiogroup" aria-label="Model">
+            <button role="radio" data-model="fast" aria-checked="true">Fast</button>
+            <button role="radio" data-model="quality" aria-checked="false">Quality</button>
+          </div>
+        </div>
+        <div class="tb-trail">
+          <button id="save" class="btn" disabled>Save…</button>
+          <button id="upscale" class="btn prominent" disabled>Upscale</button>
+        </div>
+      </header>
+
+      <div id="progress" class="progress" hidden aria-hidden="true"><div id="progress-bar"></div></div>
+      <div id="banner" class="banner hig-glass" role="alert" hidden>
+        <span id="banner-text"></span>
+        <button id="banner-close" class="btn plain" aria-label="Dismiss message">Dismiss</button>
+      </div>
+
+      <section id="stage" class="stage" aria-label="Preview">
+        <div id="empty" class="empty">
+          <svg viewBox="0 0 64 64" class="empty-icon" aria-hidden="true"><rect x="8" y="12" width="48" height="40" rx="8"/><circle cx="23" cy="26" r="5"/><path d="M10 46l14-14 10 10 8-8 14 14"/></svg>
+          <h1>Drop an image to start</h1>
+          <p>ImageUpscale enlarges photos 2× or 4× on this device. Nothing is uploaded.</p>
+          <button id="empty-open" class="btn tinted">Open Images…</button>
+        </div>
+
+        <div id="download" class="sheet hig-glass" hidden>
+          <h2>Get the Quality model</h2>
+          <p>Quality is sharper but much slower. It needs a one-time 64 MB download, then works offline.</p>
+          <div class="dl-row">
+            <button id="dl-start" class="btn tinted">Download</button>
+            <button id="dl-cancel" class="btn plain" hidden>Pause</button>
+            <span id="dl-text" class="hint" role="status"></span>
+          </div>
+        </div>
+
+        <div id="view" class="view" hidden>
+          <div id="compare" class="compare">
+            <img id="img-before" alt="Original" draggable="false" />
+            <img id="img-after" alt="Upscaled" draggable="false" />
+            <span class="chip chip-before hig-glass">Before</span>
+            <span class="chip chip-after hig-glass">After</span>
+            <div id="handle" class="handle" role="slider" tabindex="0" aria-label="Before and after" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="grip"></span></div>
+          </div>
+        </div>
+
+        <div id="working" class="working hig-glass" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <span id="working-text" role="status"></span>
+        </div>
+      </section>
+
+      <footer class="statusbar hig-glass">
+        <span id="engine" class="hint">Starting…</span>
+        <span id="status" class="status" role="status" aria-live="polite"></span>
+        <label class="fmt">Save as
+          <select id="format" aria-label="Save format">
+            <option value="png">PNG</option>
+            <option value="jpeg">JPEG</option>
+            <option value="webp">WebP</option>
+          </select>
+        </label>
+        <button id="zoom" class="btn plain small" hidden>Actual Size</button>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="updates" class="dialog" aria-labelledby="updates-title">
+    <h2 id="updates-title">Installed Updates</h2>
+    <p id="updates-current" class="hint"></p>
+    <ul id="updates-list" class="updates-list"></ul>
+    <p id="updates-empty" class="hint" hidden>No update files installed yet. Choose Install Update File… to add a .upscl file.</p>
+    <div class="dialog-actions">
+      <button id="updates-handoff" class="btn plain">Open HANDOFF.md</button>
+      <span class="spacer"></span>
+      <button id="updates-install" class="btn">Install Update File…</button>
+      <button id="updates-close" class="btn prominent">Done</button>
+    </div>
+  </dialog>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

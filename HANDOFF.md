@@ -1,0 +1,170 @@
+<!-- handoff-mark: 1 -->
+
+**Current mark: Mk I**
+
+# ImageUpscale – handoff
+
+> **MAINTENANCE RULE.** EVERYTHING done to this project is saved in this file. Every session reads this file first, in full.
+> After each change (code, config, docs, files, a fix, an experiment, a refactor, even a small one), add a dated entry at the top of the
+> Change log (section 14), newest first, with exactly these four fields:
+> - **Asked** – the owner's request, quoted or closely paraphrased.
+> - **Changed** – what was changed, with root causes and file names.
+> - **Verified** – how it was checked, with real numbers, tests run and counts. Never just "works".
+> - **Not done** – honest limits, and what was skipped, such as untested parts or no commit/push.
+>
+> The same step must also correct any other section the change makes untrue. This document is kept correct, not just appended to.
+> A prompt that changes nothing (a pure question) needs no entry. Never remove or edit the `handoff-mark` stamp on line 1 by hand:
+> `scripts/make-mark.js` owns it.
+
+## 1. What it is and who it is for
+ImageUpscale is a double-clickable desktop app (Windows and macOS, Electron) that enlarges photos 2× or 4× with Real-ESRGAN neural upscaling, entirely on the user's own machine. Nothing is uploaded; the only network use is the optional one-time download of the larger "Quality" model from Hugging Face. It is for non-technical people Sam hands it to: drop an image, press Upscale, drag a before/after slider, save as PNG, JPEG or WebP. A batch queue handles many images.
+
+**Owner:** Sam Reisen (GitHub `samuelreisen`, repo `samuelreisen/image-upscale`).
+
+**What the owner cares about / their standards:** a real installer, not "run a local server"; Apple Human Interface Guidelines look and feel; honest reporting (no installer claimed unless the file is on disk and listed; say plainly what is not built); roman-numeral update marks (Mk I, Mk II…) with this file as the project's memory; no em dashes in prose written to Sam.
+
+## 2. How to run it
+```
+npm install                       # on a normal machine. In the Linux sandbox use: npm install --ignore-scripts for onnxruntime-node (see §10)
+npm run models                    # downloads models/fast.onnx (4.9 MB), SHA-256 verified. "node scripts/fetch-models.js all" also gets quality.onnx
+npm start                         # opens the app window (smoke test only; this is not the deliverable)
+npm test                          # node --test: tiling, blending, model hash check, end-to-end upscale (needs models/fast.onnx)
+npm run bench                     # CPU seconds per input megapixel for both models
+npm run dist:win                  # on Windows: NSIS installer + portable, x64 and arm64
+npm run dist:win:portable         # works on Linux without Wine: portable .exe only, default Electron icon (see §10)
+./build-mac.sh                    # on a Mac: .dmg + .zip, universal
+npm run dist:dir                  # unpacked Linux build, used here to prove the packaged layout works
+```
+
+> **DANGER: test data.** Tests and experiments must run against a scratch data folder, never the real data.
+> Real data lives at: Electron `userData` = `%APPDATA%\ImageUpscale` (Windows), `~/Library/Application Support/ImageUpscale` (macOS), `~/.config/ImageUpscale` (Linux). It holds `models/quality.onnx` (downloaded model), `updates/` (installed `.upscl` marks, the live `HANDOFF.md`, `handoff-history/`).
+> Scratch switch: set `IMAGEUPSCALE_DATA_DIR=<empty temp folder>` before launching the app or running anything that installs updates or downloads models. `electron/main.js` redirects `userData` there at startup.
+> Unit tests (`npm test`) write only to OS temp folders and never touch `userData`.
+
+## 3. Repository map
+```
+package.json            productName ImageUpscale, appId com.samuelreisen.imageupscale, electron-builder config
+electron/
+  main.js               window, native menu (every toolbar action also in a menu), all IPC handlers, batch job, save dialogs, launch args, open-file
+  preload.js            the only bridge: window.native.* (ipcRenderer is never exposed)
+  upscaler.js           onnxruntime-node session (DirectML on Windows, CoreML on macOS, else CPU, with CPU fallback), tiled inference, progress, cancel, decode/encode via sharp
+  tile.js               pure maths: planTiles, Blender (feathered overlap blend), boxDown2 (4x tile to 2x). No Electron/ONNX imports, unit tested
+  models.js             model registry (pinned URL + SHA-256), resumable verified download. No Electron imports, shared with scripts/fetch-models.js
+  updates.js            .upscl installer for the running app, wraps scripts/markpack.js + install-mark.js
+renderer/
+  index.html            strict CSP, no inline script/style
+  renderer.js           UI logic (queue, compare slider, model sheet, updates dialog). File names are only ever set with textContent
+  styles.css            HIG layout on top of the tokens
+  assets/hig-tokens.css Apple HIG tokens (semantic light/dark colours, type, radii, increased-contrast rules)
+build/                  icon.png / icon.icns / icon.ico (PLACEHOLDER art), entitlements.mac.plist
+models/                 fast.onnx and quality.onnx fetched here, git-ignored
+scripts/
+  fetch-models.js  make-icons.js  make-fixture.js  bench.js  cross-deps.js  after-pack.js
+  markpack.js  make-mark.js  install-mark.js  verify-mark-system.js  mark.config.json   (update-file system, extension .upscl)
+marks/history.json      list of built marks (starts as [])
+tests/                  tile.test.js (unit), upscale.test.js (real model end to end), fixtures/scene.png (320×240)
+build-mac.sh            run on a Mac to produce the .dmg
+INSTALL.md  README.md  CLAUDE.md  HANDOFF.md
+```
+
+## 4. Data model
+No database. Per-run state lives in the main process: `items` Map (`id → { path, name, width, height, status ready|working|done|error, resultPath, scale }`), cached `Upscaler` per model, one `job` and one `download` at a time. Finished upscales are written as lossless PNG into an OS temp folder `ImageUpscale-XXXXXX` (so a batch never holds many 100 MB+ buffers) and deleted on quit. The renderer holds only previews (data URLs, ≤3200 px long edge). Preferences (scale, model, format) are in the renderer's `localStorage`, wrapped in try/catch.
+
+## 5. Core logic
+- **Tiling:** `planTiles(w,h,192,16)` splits the image into ≤192 px tiles overlapping 16 px; the last tile on each axis is shifted back so every tile is full size. Every pixel is covered at least once.
+- **Blend:** `Blender` accumulates tiles × feather weight and divides by the weight sum. Weights ramp over `overlap×scale` pixels only on edges that touch a neighbour; image borders stay full weight.
+- **Scale:** the model is always ×4. For 2× each 4× tile is box-averaged to 2× (`boxDown2`) before blending, so memory is a quarter of blending at 4×.
+- **Limits:** output capped at 64 million pixels (Blender needs 16 bytes per output pixel). That is about 4 MP input at 4× and 16 MP at 2×; larger images get a message to crop or shrink.
+- **Alpha:** RGB goes through the model; alpha is resized separately with Lanczos and rejoined.
+- **Execution provider:** try DirectML (Windows) or CoreML (macOS) alone first, then CPU. The label shown is the provider whose session actually loaded. If a GPU run throws mid-job the session is reopened on CPU and the tile retried once.
+- **Cancel:** an `AbortController` is checked between tiles, so cancel takes effect within one tile.
+- **Models** (`electron/models.js`, both BSD-3-Clause Real-ESRGAN exports, pinned to a Hugging Face commit and SHA-256):
+  - Fast = `CoderViking/realesr-general-x4v3-onnx` @ `c6a9717…`, 4,866,417 bytes, sha256 `1940a93e…f112`. Official v0.2.5.0 weights; export script lives in that repo.
+  - Quality = `SceneWorks/real-esrgan-onnx` `real_esrgan_x4.onnx` @ `09f741b…`, 67,051,616 bytes (64 MiB), sha256 `5c586662…c033` (matches the hash on its model card).
+
+Regression targets (numbers this logic was verified against, re-check after changing it):
+- `npm test` = 10 tests, 10 pass.
+- Fixture `tests/fixtures/scene.png` (320×240) with the Fast model on CPU: 4× → 1280×960, PSNR vs plain Lanczos 29.4 dB; 2× → 640×480, 28.8 dB; 4 tiles each. Seam test (gradient, 300×200 ×2): max error ≤ 1 level.
+- Speed on a 4-thread 2.1 GHz Xeon, CPU only, 4×: Fast ≈ 14 to 16 s per input megapixel, Quality ≈ 167 to 177 s per input megapixel (about 12× slower). The 320×240 fixture takes about 1.1 to 1.9 s (Fast) and about 13 s (Quality).
+
+## 6. Subsystem notes
+- **Compare view:** two stacked `<img>`; the "after" is clipped with `clip-path: inset(0 0 0 var(--pos))`. Slider is `role="slider"`, arrows move 2 %, Shift+arrows 10 %, Home/End jump. "Actual Size" shows the preview at one image pixel per device pixel; previews are capped at 3200 px, the saved file is always full size.
+- **Model download:** `downloadModel` writes `quality.onnx.part`, resumes with a Range request, follows redirects (Hugging Face redirects to a CDN), checks size then SHA-256, then renames. A hash mismatch deletes the part file and retries once. Uses `stream/promises.pipeline` so an aborted stream is closed before a resume starts (a hand-rolled version raced and produced a short file).
+- **Updates (`.upscl`):** see §11 and `electron/updates.js`. Installed marks go to `userData/updates`. Only `renderer/` and `HANDOFF.md` are hot-swappable; `electron/` code needs a reinstall. The app loads `updates/renderer` only when its mark number is higher than the bundled `mark.json`.
+- **Native menu:** `buildMenu()` is rebuilt whenever the renderer pushes state (`state:set`) so enabled/checked items follow the UI.
+
+## 7. Traps and facts only real data revealed
+- **sharp was a dev dependency in the skill template.** electron-builder drops dev dependencies, so the first Windows build contained no `sharp` and the packaged app would have crashed on launch while `npm start` worked. `sharp` is now in `dependencies` and unpacked from the asar.
+- **onnxruntime-node 1.30 dropped macOS Intel.** Its `bin/napi-v6/darwin` has only `arm64`. Pinned to exactly 1.23.2, which has darwin x64+arm64 and win32 x64+arm64 (DirectML). Do not bump it without checking the tarball for `darwin/x64`, or the universal `.dmg` breaks on Intel Macs.
+- **onnxruntime-node's postinstall downloads CUDA binaries from api.nuget.org** and fails with ECONNRESET in the sandbox. It only matters for Linux CUDA, which this app does not use, so it is installed with `--ignore-scripts`. Windows and macOS binaries are inside the npm tarball.
+- **Without pruning, each installer carries ~290 MB of onnxruntime for the wrong OSes.** `scripts/after-pack.js` deletes every other platform/arch of onnxruntime-node and `@img/sharp*`.
+- **npm installs sharp's native package only for the host OS.** `scripts/cross-deps.js` adds the others with `--os/--cpu --no-save` before `dist:*`.
+- Download resume bug (see §6) and a test race (a stale "Saved" banner made a test read a file early) were the two real defects found by running the thing; both fixed.
+- CSP blocks inline `style=""` attributes; set styles from JS (`el.style.x = …`) or classes.
+- `IMAGE_EXT` only lists extensions; real validation is `sharp(...).metadata()`, so a text file named `.png` is rejected with a readable message.
+
+## 8. Persistence
+`userData/models/quality.onnx` (downloaded, hash-verified), `userData/updates/` (installed marks, `HANDOFF.md`, `handoff-history/`, `mark.json`, `renderer/`), renderer `localStorage` prefs. Everything else is temp and deleted on quit.
+
+**Must never be lost:** the installed `HANDOFF.md` in `userData/updates` (newer-wins sync keeps backups in `handoff-history/`), and `marks/history.json` in the repo (the mark counter).
+
+## 9. UI notes and traps
+- HIG: system font stack (SF Pro on Apple, Segoe UI elsewhere), 15 px body, content edge to edge, toolbar and status bar are floating translucent glass above it, 44 px minimum hit targets, one prominent action ("Upscale"), Cancel on the leading side and only shown while busy, concentric radii (toolbar 28, controls 22, segmented 19 inside 3 px padding), verb buttons, empty state "Drop an image to start", errors say how to fix. Honours light/dark, `prefers-contrast: more`, `prefers-reduced-motion`, `prefers-reduced-transparency`.
+- macOS uses `titleBarStyle: 'hiddenInset'`; the sidebar header and toolbar are drag regions with the controls set to `no-drag`. **This has not been seen on a real Mac** (no Mac here).
+- The window minimum is 900 px wide; below that the toolbar would not fit.
+- Placeholder art: `build/icon.*` is a generated PLACEHOLDER. Replace `build/icon.png` or run `node scripts/make-icons.js logo.png`.
+
+## 10. Platform and build notes
+- Build host so far: Linux sandbox. Linux `dist:dir` works and the packaged binary was driven through the UI under Xvfb.
+- **Windows from Linux:** the NSIS setup installer cannot be built here. electron-builder makes the NSIS uninstaller by running the freshly built installer under Wine (`NsisTarget.computeScriptAndSignUninstaller`), and there is no Wine on this box; `-c.win.signAndEditExecutable=false` does not avoid it (tried, same `spawn wine ENOENT`). The **portable** target needs no uninstaller, so `npm run dist:win:portable` does build: `ImageUpscale-Portable-<ver>-x64.exe`, `-arm64.exe`, and a combined `ImageUpscale-Portable-<ver>.exe` that carries both. With `signAndEditExecutable=false` those exes have the default Electron icon and no version metadata. None of the Windows output has been run on Windows. Real installers: run `npm run dist:win` on a Windows machine (or Linux with Wine).
+- **macOS:** `.dmg` cannot be built on Linux. Run `./build-mac.sh` on a Mac. Ad-hoc signed (`-c.mac.identity=-`), so Gatekeeper asks for right-click, Open once (INSTALL.md).
+- DirectML (Windows) and CoreML (macOS) paths are written and fall back to CPU, but have **not been run on real hardware**; only CPU has been exercised.
+- `npm run dist:*` run `predist:*` first (fetch the Fast model, add the other-platform sharp packages).
+
+## 11. Working method
+- Read this file first. Log every change (see the Maintenance rule).
+- Ship changes with `node scripts/make-mark.js --title "..." --notes "..." --entry entry.md`. Call `node` directly for multi-line notes: on Windows, `npm run` cuts a multi-line argument at the first line break.
+- Marks are named Mk I, Mk II, Mk III (roman numerals). The `handoff-mark` stamp and `marks/history.json` hold the plain number.
+- Install a mark with `node scripts/install-mark.js <file>` (newer HANDOFF.md wins, the replaced one is kept in `handoff-history/`). `node scripts/verify-mark-system.js` re-checks the whole system.
+- In the app: File → Install Update File… (or double-click a `.upscl`), File → Installed Updates… to switch between the 5 newest, Help → Open HANDOFF.md. Extension is `.upscl`; mark files are named `ImageUpscale-MkI.upscl`.
+- Always run tests against a scratch data dir (`IMAGEUPSCALE_DATA_DIR`).
+
+## 12. Open items and known quirks (prioritised)
+1. **Not built:** the NSIS `Setup` installers (need Windows or Wine) and the macOS `.dmg`/`.zip` (need a Mac: `./build-mac.sh`). Built here: Windows portable x64/arm64 (unsigned, default icon, never run on Windows).
+2. DirectML and CoreML are untested on real hardware.
+3. Placeholder icon.
+4. Installers are unsigned (SmartScreen / Gatekeeper warnings).
+5. Quality model is slow on CPU (~12× Fast); no GPU path has been timed.
+6. Upscalers invent plausible detail (the fixture's small text is visibly reshaped); not faithful restoration.
+7. Huge images are refused (64 MP output cap) instead of streamed.
+8. Animated GIFs use the first frame only.
+9. A mark can only update `renderer/` and `HANDOFF.md`; main-process changes need a new installer.
+10. `npm audit` reports 8 moderate advisories in build-time dependencies (electron-builder tree); not reviewed.
+
+## 13. Rough chronology (why the code looks the way it does)
+1. Browser-page plan rejected; direction set to a native Electron app with real installers, HIG UI and a mark system.
+2. Tiling and blend maths written first as pure code with tests, because seams are the classic tiled-upscaler bug.
+3. Model sources chosen by actually downloading candidates and loading them in onnxruntime (dynamic H/W, license BSD-3, published hash).
+4. Packaging found two bugs the dev run hid (sharp missing, 290 MB of foreign binaries), then the macOS Intel gap in onnxruntime 1.30.
+
+## 14. Change log
+Format: `### <date> – <title>` then the four fields **Asked**, **Changed**, **Verified**, **Not done**. Newest first. Mark entries read `### <date> – Mk <Roman> "<title>" – update file` and end with a **Mark file** line.
+
+### 2026-10-18 – Built Windows portable installers, checked the update installer inside the real app, wrote INSTALL.md and README.md
+- **Asked** – Build `dist:win` and `dist:mac`, `ls -lh release/`, report paths and sizes; wire the `.upscl` updater and check it with a temporary Mk II; INSTALL.md and README with real speed numbers and limits.
+- **Changed** – `npm run dist:win:portable` added (portable target only, `-c.win.signAndEditExecutable=false`, no Wine needed). `build-mac.sh`, `INSTALL.md`, `README.md`, `CLAUDE.md` written. HANDOFF §2, §10, §12 corrected to the real build status. This entry is a docs-only change after Mk I, so the stamp is still 1 and no new mark was cut.
+- **Verified** – `npm run dist:win` (NSIS + portable) failed twice with `spawn wine ENOENT`, the second time with `-c.win.signAndEditExecutable=false`; cause read in `NsisTarget.computeScriptAndSignUninstaller` (uninstaller is generated by running the installer under Wine). `npm run dist:win:portable` exit 0, three `.exe` files built (x64, arm64, combined); unpacked trees checked with `file` (PE32+ x86-64 and Aarch64), `models/fast.onnx` present, `DirectML.dll` and `onnxruntime.dll` present for the right arch, matching `@img/sharp-win32-*`, `mark.json` = Mk I inside `app.asar`. `electron-builder --mac dir --arm64` packaged `ImageUpscale.app` (arm64-only onnxruntime/sharp, `.upscl` document type in `Info.plist`, bundle id correct). Packaged Linux build driven through the UI under Xvfb: upscale OK. Update system in the real app (dialogs stubbed): temporary Mk II built in a scratch copy installed, UI reloaded into the Mk II renderer, `HANDOFF.md` replaced with a `was-MkI` backup, installing older Mk I afterwards left the Mk II handoff alone, switch to Mk I worked, a garbage file and a tampered file were refused with readable messages and wrote nothing. `node scripts/verify-mark-system.js`: 21/21 pass. `npm test`: 10/10 pass.
+- **Not done** – NSIS Windows setup installers; macOS `.dmg`/`.zip` (no Mac: run `./build-mac.sh`); running any build on Windows or macOS; DirectML/CoreML on hardware; real icon (placeholder); signing. The Windows `.exe` files have the default Electron icon because executable editing was skipped.
+
+### 2026-10-18 – Mk I "First release" – update file
+- **Asked** – Build Mk I, the first update file, with extension `.upscl`, after setting up HANDOFF.md and the mark tooling.
+- **Changed** – First mark. Ships `renderer/` (index.html, renderer.js, styles.css, assets/hig-tokens.css) plus this HANDOFF.md and `mark.json`. Nothing outside `renderer/` can be hot-swapped by a mark, so `electron/` code in the installers is unchanged by it. `marks/history.json` now holds Mk I; `HANDOFF.md` reads "Current mark: Mk I".
+- **Verified** – `--dry-run` first (self-check parsed the file back with the installer's own parser: file count, stamp and HANDOFF text matched), then the real build, then `node scripts/verify-mark-system.js` (output reported in the final message of the session).
+- **Not done** – At the moment Mk I was built nothing had installed an update through the app's own "Install Update File…" dialog, and nothing has been installed on a real Windows or Mac machine.
+- **Mark file:** `marks/out/ImageUpscale-MkI.upscl` (6 files, minimum shell 1.0.0)
+
+### 2026-10-18 – Built the app and set up HANDOFF.md and the update-file system
+- **Asked** – "On-device image upscaler, native desktop app": Electron + electron-builder, Real-ESRGAN via onnxruntime-node (Fast bundled, Quality downloaded on demand), HIG styled UI, batch queue, before/after slider, save PNG/JPEG/WebP, handoff system with extension `.upscl`, Roman-numeral marks, installers for Windows and Mac, honest reporting.
+- **Changed** – Everything in §3. Notable decisions: onnxruntime-node pinned to 1.23.2; sharp moved to dependencies; afterPack pruning; resumable hash-verified model download; 2× via per-tile box downsample; per-item PNG temp results; `.upscl` updater wired through `electron/updates.js` (installs to `userData/updates`, loads a newer `renderer/` from there); `scripts/` mark tooling copied from the skill templates with `mark.config.json` (`ext .upscl`, ships `renderer` + `HANDOFF.md`); CLAUDE.md standing block; `IMAGEUPSCALE_DATA_DIR` scratch switch.
+- **Verified** – `npm test` 10/10 pass (includes real-model 4× and 2× on the fixture, cancel, size limit). Real Electron app launched under Xvfb (dev tree and packaged `linux-unpacked`): UI upscale, Quality 2× via UI (19 s), save PNG/JPEG/WebP with correct dimensions, Save All with no overwrite, corrupt file rejected with a message, no page errors, `require`/`process` undefined in the renderer. Model download aborted at ~30 % and resumed to a matching SHA-256; a one-byte change is detected. grep: no localhost, no remote URLs, no inline script/style in the renderer. Windows portable x64 and arm64 built without Wine (`npm run dist:win:portable`); their unpacked trees checked for the right PE type, `models/fast.onnx`, DirectML and onnxruntime DLLs and the matching `sharp` package.
+- **Not done** – NSIS Windows setup installers (no Wine here; `spawn wine ENOENT` twice, once with `-c.win.signAndEditExecutable=false`), the macOS `.dmg`/`.zip` (no Mac), running any Windows build on Windows, DirectML/CoreML on real hardware, a real icon, code signing, a real Mac layout check.
