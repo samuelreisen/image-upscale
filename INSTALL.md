@@ -4,7 +4,15 @@ ImageUpscale runs entirely on your computer. Your images are never uploaded. The
 
 The app is **not code-signed** (that needs a paid certificate), so Windows and macOS will warn you the first time. It is safe if you got it directly from the person who built it.
 
-## Windows
+## Windows, easiest: the server zip (no install)
+
+1. Unzip `ImageUpscale-Server-Windows-x64.zip` anywhere (extract it first, do not run it from inside the zip viewer).
+2. Double-click **Start ImageUpscale.bat**. A black window opens and your browser opens to the app. Keep the black window open while you use it; closing it stops the app.
+3. If Windows says "Windows protected your PC": **More info**, then **Run anyway**. If the firewall asks about Node.js you can choose Cancel: it only talks to your own browser.
+
+It runs a small server on your own computer (`http://127.0.0.1:4317`) that nothing else on your network can reach. Images never leave the machine. Saving downloads files through your browser. If port 4317 is busy, run `set PORT=4400` in a Command Prompt in that folder first, then start the `.bat` from that same window.
+
+## Windows, desktop app (portable)
 
 You were given one of these files. If unsure, pick the **x64** one. Use **arm64** only on Windows-on-ARM machines (for example a Surface Pro X or Snapdragon laptop).
 
