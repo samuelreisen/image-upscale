@@ -155,6 +155,12 @@ Regression targets (numbers this logic was verified against, re-check after chan
 ## 14. Change log
 Format: `### <date> – <title>` then the four fields **Asked**, **Changed**, **Verified**, **Not done**. Newest first. Mark entries read `### <date> – Mk <Roman> "<title>" – update file` and end with a **Mark file** line.
 
+### 2026-10-20 – Windows zip for handing out
+- **Asked** – "please give me a zip with the windows install".
+- **Changed** – Built `release/ImageUpscale-Windows-1.0.0.zip` (git-ignored, under `release/`) holding the x64 and arm64 portable `.exe` plus `INSTALL.md`, in a folder `ImageUpscale-Windows/`. No code changed.
+- **Verified** – `zipfile.testzip()` ok; listing shows the three entries (115.5, 108.6 MB and INSTALL.md); zip is 225 MB.
+- **Not done** – It is the portable build, not an NSIS setup installer (needs Windows or Wine). Not run on Windows. Default Electron icon on the `.exe`. Unsigned.
+
 ### 2026-10-20 – Mk II "Logo and first-frame note" – update file
 - **Asked** – Ship the interface changes from the logo and size-cap work as the next update file.
 - **Changed** – Mk II carries `renderer/`: the Quad Zoom app icon in the empty state (`assets/app-icon.svg`), and the "first frame only" note on animated images in the queue. It also carries this HANDOFF.md. The streaming upscaler, the 256 MP cap, the WebP size guard, the new icon files and the smaller bundle live in `electron/` and `build/`, which a mark cannot replace; they need the rebuilt installers.
