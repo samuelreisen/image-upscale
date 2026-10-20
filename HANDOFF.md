@@ -59,8 +59,9 @@ renderer/
 build/                  icon.png / icon.icns / icon.ico (generated from branding/app-icon.svg), entitlements.mac.plist
 branding/               logo exploration: 8 SVG variants, showcase.html, contact-sheet.png, logo.svg (flat mark), app-icon.svg (gradient tile). Chosen: Quad Zoom
 models/                 fast.onnx and quality.onnx fetched here, git-ignored
+server/                 LOCAL WEB MODE (owner asked for it): server.js (Node http on 127.0.0.1:4317, same UI, same upscaler/models), web-shim.js (provides window.native in a browser)
 scripts/
-  fetch-models.js  make-icons.js  make-logo.js  make-fixture.js  bench.js  cross-deps.js  after-pack.js
+  pack-server.js  fetch-models.js  make-icons.js  make-logo.js  make-fixture.js  bench.js  cross-deps.js  after-pack.js
   markpack.js  make-mark.js  install-mark.js  verify-mark-system.js  mark.config.json   (update-file system, extension .upscl)
 marks/history.json      list of built marks (starts as [])
 tests/                  tile.test.js (unit), upscale.test.js (real model end to end), fixtures/scene.png (320×240)
@@ -92,6 +93,7 @@ Regression targets (numbers this logic was verified against, re-check after chan
 - **Compare view:** two stacked `<img>`; the "after" is clipped with `clip-path: inset(0 0 0 var(--pos))`. Slider is `role="slider"`, arrows move 2 %, Shift+arrows 10 %, Home/End jump. "Actual Size" shows the preview at one image pixel per device pixel; previews are capped at 3200 px, the saved file is always full size.
 - **Model download:** `downloadModel` writes `quality.onnx.part`, resumes with a Range request, follows redirects (Hugging Face redirects to a CDN), checks size then SHA-256, then renames. A hash mismatch deletes the part file and retries once. Uses `stream/promises.pipeline` so an aborted stream is closed before a resume starts (a hand-rolled version raced and produced a short file).
 - **Updates (`.upscl`):** see §11 and `electron/updates.js`. Installed marks go to `userData/updates`. Only `renderer/` and `HANDOFF.md` are hot-swappable; `electron/` code needs a reinstall. The app loads `updates/renderer` only when its mark number is higher than the bundled `mark.json`.
+- **Local web mode (`server/`):** `npm run serve` (or `node server/server.js`, `--open` opens the browser). `server.js` serves `renderer/` unchanged, rewrites `index.html` on the fly (CSP `connect-src 'none'` becomes `'self'`, injects `/__web/web-shim.js`, adds a favicon) and implements the same operations as `electron/main.js` over HTTP (`/api/*`, progress via Server-Sent Events). Uploaded images and results live in an OS temp folder deleted on exit; the Quality model goes to `~/.ImageUpscale/models` (or `IMAGEUPSCALE_DATA_DIR`). Save = browser download; Save All = several downloads. No native menu: the shim maps Ctrl/Cmd+O, S, Shift+S, Enter and Esc to the same commands. Update files and "Open HANDOFF.md" are desktop-only. Binds 127.0.0.1; any request with a non-local Host or a foreign Origin gets 403 (DNS-rebinding guard); static files are confined to `renderer/` and the shim. Logic duplicated from `main.js` (item handling, job loop): keep them in step, or extract a shared module.
 - **Native menu:** `buildMenu()` is rebuilt whenever the renderer pushes state (`state:set`) so enabled/checked items follow the UI.
 
 ## 7. Traps and facts only real data revealed
@@ -122,6 +124,7 @@ Regression targets (numbers this logic was verified against, re-check after chan
 - Build host so far: Linux sandbox. Linux `dist:dir` works and the packaged binary was driven through the UI under Xvfb.
 - **Windows from Linux:** the NSIS setup installer cannot be built here. electron-builder makes the NSIS uninstaller by running the freshly built installer under Wine (`NsisTarget.computeScriptAndSignUninstaller`), and there is no Wine on this box; `-c.win.signAndEditExecutable=false` does not avoid it (tried, same `spawn wine ENOENT`). The **portable** target needs no uninstaller, so `npm run dist:win:portable` does build: `ImageUpscale-Portable-<ver>-x64.exe`, `-arm64.exe`, and a combined `ImageUpscale-Portable-<ver>.exe` that carries both. With `signAndEditExecutable=false` those exes have the default Electron icon and no version metadata. electron-builder's own downloadable Wine (`-c.toolsets.wine=1.0.1`, beta, Wine 11 from electron-builder-binaries) was tried on 2026-10-20: it downloads and starts, then fails with `failed to load .../x86_64-unix/ntdll.dll error c0000135` because the published `wine-11.0-linux-x86_64.tar.xz` contains only `lib/wine/x86_64-unix` and no `x86_64-windows`/`i386-windows` PE directories. A dead end on Linux for now; recheck when a newer toolset is published. System Wine (apt `wine`, `wine64`, `wine32:i386`) is available from apt in this sandbox but was not installed (owner declined). Cleanest route: build on a Windows runner (GitHub Actions `windows-latest`) or a Windows PC. None of the Windows output has been run on Windows. Real installers: run `npm run dist:win` on a Windows machine (or Linux with Wine).
 - **macOS:** `.dmg` cannot be built on Linux. Run `./build-mac.sh` on a Mac. Ad-hoc signed (`-c.mac.identity=-`), so Gatekeeper asks for right-click, Open once (INSTALL.md).
+- **Server bundle for Windows:** `npm run pack:server:win` builds `release/ImageUpscale-Server-Windows-x64.zip`: staged `server/`, `renderer/`, `electron/{tile,upscaler,models}.js`, `models/fast.onnx`, `npm ci --omit=dev --os=win32 --cpu=x64` (so the right sharp/ONNX binaries), pruned of other platforms, plus a portable `node.exe` (Node v22.23.3, SHA-256 checked against nodejs.org's SHASUMS256) and `Start ImageUpscale.bat`. No Wine, no installer. The same script stages Linux/macOS trees (`node scripts/pack-server.js linux x64 --no-zip`), which is how the file set was proven complete (run in isolation, browser test passed). Windows-on-ARM uses the x64 bundle under emulation (not tested).
 - DirectML (Windows) and CoreML (macOS) paths are written and fall back to CPU, but have **not been run on real hardware**; only CPU has been exercised.
 - `npm run dist:*` run `predist:*` first (fetch the Fast model, add the other-platform sharp packages).
 
@@ -134,6 +137,7 @@ Regression targets (numbers this logic was verified against, re-check after chan
 - Always run tests against a scratch data dir (`IMAGEUPSCALE_DATA_DIR`).
 
 ## 12. Open items and known quirks (prioritised)
+0. Server mode (`server/`) and `ImageUpscale-Server-Windows-x64.zip` exist but the Windows bundle has never been run on Windows (only an identically structured Linux staging was).
 1. **Not built:** the NSIS `Setup` installers (need Windows or Wine) and the macOS `.dmg`/`.zip` (need a Mac: `./build-mac.sh`). Built here: Windows portable x64/arm64 (unsigned, default icon, never run on Windows).
 2. DirectML and CoreML are untested on real hardware.
 3. Icon is a real mark now (Quad Zoom) but a first pass; a designer may want to refine it.
@@ -154,6 +158,12 @@ Regression targets (numbers this logic was verified against, re-check after chan
 
 ## 14. Change log
 Format: `### <date> – <title>` then the four fields **Asked**, **Changed**, **Verified**, **Not done**. Newest first. Mark entries read `### <date> – Mk <Roman> "<title>" – update file` and end with a **Mark file** line.
+
+### 2026-10-20 – Local web server mode and a Windows zip that needs no installer
+- **Asked** – "fuck it run it as a server" (after the NSIS installer could not be built without Wine).
+- **Changed** – New `server/server.js` + `server/web-shim.js`, `scripts/pack-server.js`, npm scripts `serve`, `serve:quiet`, `pack:server:win`, `pack:server:win-arm64`. CLAUDE.md rule "no localhost anywhere" amended with this one explicit exception. README/INSTALL/HANDOFF updated. Built `release/ImageUpscale-Server-Windows-x64.zip` (70 MB). The desktop app and `renderer/` are unchanged, so no new mark.
+- **Verified** – Server bound to 127.0.0.1; wrong Host header 403, cross-origin POST 403, `/../package.json` and `/%2e%2e/package.json` 404. Chromium driven against it: file chooser upload, a corrupt file rejected with a message, upscale 3.0 s, downloads in PNG/JPEG/WebP all 1280×960, Save All shortcut, Quality sheet, zero page errors (a favicon 404 was found and fixed). Linux staging of the bundle copied out of the repo and run alone: same browser test passes. Windows bundle: `zipfile.testzip` ok, 581 entries, Node v22.23.3 SHA-256 verified, win32 x64 `onnxruntime` (DirectML) and `sharp`/libvips DLLs present, `.bat` has CRLF.
+- **Not done** – Never run on Windows. Windows-on-ARM, macOS and Linux bundles not built as deliverables. No authentication (relies on loopback + Host/Origin checks), so do not set `HOST=0.0.0.0`. NSIS setup installer and `.dmg` still not built.
 
 ### 2026-10-20 – Tried to build the Windows setup installer without system Wine
 - **Asked** – "make the windows setup installer finish everything"; then "why do you need wine, use electron", then "for every other project running a native app ive never needed wine".

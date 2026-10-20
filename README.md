@@ -10,6 +10,8 @@ A desktop app that enlarges photos **2× or 4×** with Real-ESRGAN, entirely on 
 - Apple HIG styling: light, dark, increased contrast, reduced motion
 - `.upscl` update files with numbered marks (Mk I, Mk II…), see `HANDOFF.md`
 
+**Two ways to run it:** the desktop app (Electron) or a local web server (`npm run serve`, or the Windows zip with Node included). Both use the same UI and the same models, and both keep everything on your computer.
+
 Installing: see [INSTALL.md](INSTALL.md). Architecture, traps and change history: [HANDOFF.md](HANDOFF.md).
 
 ## Models
@@ -44,6 +46,10 @@ Quality is about 12 times slower than Fast on a CPU. The 3 MP column is extrapol
 - **Animated GIFs** are upscaled from their first frame only (the queue says so).
 - **Update files** can replace the interface (`renderer/`) and `HANDOFF.md`, not the main-process code.
 - **Build status:** only the Windows portable `.exe` files (x64, arm64, combined) have been built, on Linux, with the default Electron icon, and have not been run on Windows. The Windows setup installer and the macOS `.dmg` are not built (they need Windows/Wine and a Mac). The icon is a first-pass mark, not a designer's final.
+
+## Local web mode
+
+`npm run serve` starts a server on `http://127.0.0.1:4317/` and opens your browser. It is bound to your own computer only (other machines cannot connect, and requests with a foreign Host or Origin header are refused), images are uploaded to that local process and nothing goes further. There is no password, so do not expose it with `HOST=0.0.0.0`. `npm run pack:server:win` builds a zip with Node bundled for people who do not have Node.
 
 ## Develop
 
