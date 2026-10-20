@@ -1,6 +1,6 @@
-<!-- handoff-mark: 1 -->
+<!-- handoff-mark: 2 -->
 
-**Current mark: Mk I**
+**Current mark: Mk II**
 
 # ImageUpscale – handoff
 
@@ -56,10 +56,11 @@ renderer/
   renderer.js           UI logic (queue, compare slider, model sheet, updates dialog). File names are only ever set with textContent
   styles.css            HIG layout on top of the tokens
   assets/hig-tokens.css Apple HIG tokens (semantic light/dark colours, type, radii, increased-contrast rules)
-build/                  icon.png / icon.icns / icon.ico (PLACEHOLDER art), entitlements.mac.plist
+build/                  icon.png / icon.icns / icon.ico (generated from branding/app-icon.svg), entitlements.mac.plist
+branding/               logo exploration: 8 SVG variants, showcase.html, contact-sheet.png, logo.svg (flat mark), app-icon.svg (gradient tile). Chosen: Quad Zoom
 models/                 fast.onnx and quality.onnx fetched here, git-ignored
 scripts/
-  fetch-models.js  make-icons.js  make-fixture.js  bench.js  cross-deps.js  after-pack.js
+  fetch-models.js  make-icons.js  make-logo.js  make-fixture.js  bench.js  cross-deps.js  after-pack.js
   markpack.js  make-mark.js  install-mark.js  verify-mark-system.js  mark.config.json   (update-file system, extension .upscl)
 marks/history.json      list of built marks (starts as [])
 tests/                  tile.test.js (unit), upscale.test.js (real model end to end), fixtures/scene.png (320×240)
@@ -72,9 +73,9 @@ No database. Per-run state lives in the main process: `items` Map (`id → { pat
 
 ## 5. Core logic
 - **Tiling:** `planTiles(w,h,192,16)` splits the image into ≤192 px tiles overlapping 16 px; the last tile on each axis is shifted back so every tile is full size. Every pixel is covered at least once.
-- **Blend:** `Blender` accumulates tiles × feather weight and divides by the weight sum. Weights ramp over `overlap×scale` pixels only on edges that touch a neighbour; image borders stay full weight.
+- **Blend:** `StripBlender` accumulates tiles × feather weight and divides by the weight sum. Weights ramp over `overlap×scale` pixels only on edges that touch a neighbour; image borders stay full weight. It holds one tile row only: once a tile row is done, every output row above the next row's start is final, so it is converted to bytes and streamed (`sink`) to a temp `.raw` file, which sharp then encodes to PNG from a read stream. `Blender` (whole image in RAM) is kept only as the reference the tests compare against; `StripBlender` output is byte-identical to it.
 - **Scale:** the model is always ×4. For 2× each 4× tile is box-averaged to 2× (`boxDown2`) before blending, so memory is a quarter of blending at 4×.
-- **Limits:** output capped at 64 million pixels (Blender needs 16 bytes per output pixel). That is about 4 MP input at 4× and 16 MP at 2×; larger images get a message to crop or shrink.
+- **Limits:** output capped at 256 million pixels (16384 × 16384), i.e. about 16 MP input at 4× and 64 MP at 2×. The cap is disk (temp raw file = 3 bytes per output pixel) and PNG/libvips practicality, not RAM. WebP saves are refused above 16383 px on a side (format limit) with a message to use PNG or JPEG.
 - **Alpha:** RGB goes through the model; alpha is resized separately with Lanczos and rejoined.
 - **Execution provider:** try DirectML (Windows) or CoreML (macOS) alone first, then CPU. The label shown is the provider whose session actually loaded. If a GPU run throws mid-job the session is reopened on CPU and the tile retried once.
 - **Cancel:** an `AbortController` is checked between tiles, so cancel takes effect within one tile.
@@ -101,6 +102,8 @@ Regression targets (numbers this logic was verified against, re-check after chan
 - **npm installs sharp's native package only for the host OS.** `scripts/cross-deps.js` adds the others with `--os/--cpu --no-save` before `dist:*`.
 - Download resume bug (see §6) and a test race (a stale "Saved" banner made a test read a file early) were the two real defects found by running the thing; both fixed.
 - CSP blocks inline `style=""` attributes; set styles from JS (`el.style.x = …`) or classes.
+- **npm audit:** `npm audit` flags `adm-zip`, `global-agent`, `roarr`, `sprintf-js` via `onnxruntime-node`, but only its install script (`script/`, unzips CUDA downloads at `npm install`) uses them. They were being bundled into the app anyway, so `build.files` now excludes them and `onnxruntime-node/script/**`; the packaged app was re-run to prove it does not need them. The other advisories are electron-builder build tooling and never ship. `npm audit fix --force` would downgrade electron-builder and force onnxruntime-node 1.30 (no macOS Intel): do not run it.
+- Streaming bug to remember: `fs.writeSync` takes the typed array, not `.buffer`.
 - `IMAGE_EXT` only lists extensions; real validation is `sharp(...).metadata()`, so a text file named `.png` is rejected with a readable message.
 
 ## 8. Persistence
@@ -112,7 +115,8 @@ Regression targets (numbers this logic was verified against, re-check after chan
 - HIG: system font stack (SF Pro on Apple, Segoe UI elsewhere), 15 px body, content edge to edge, toolbar and status bar are floating translucent glass above it, 44 px minimum hit targets, one prominent action ("Upscale"), Cancel on the leading side and only shown while busy, concentric radii (toolbar 28, controls 22, segmented 19 inside 3 px padding), verb buttons, empty state "Drop an image to start", errors say how to fix. Honours light/dark, `prefers-contrast: more`, `prefers-reduced-motion`, `prefers-reduced-transparency`.
 - macOS uses `titleBarStyle: 'hiddenInset'`; the sidebar header and toolbar are drag regions with the controls set to `no-drag`. **This has not been seen on a real Mac** (no Mac here).
 - The window minimum is 900 px wide; below that the toolbar would not fit.
-- Placeholder art: `build/icon.*` is a generated PLACEHOLDER. Replace `build/icon.png` or run `node scripts/make-icons.js logo.png`.
+- Icon: `build/icon.*` comes from `branding/app-icon.svg` (Quad Zoom mark: one pixel becomes four, which is what a 2× upscale does). Regenerate with `node scripts/make-logo.js`, render `branding/app-icon.svg` to a 1024 PNG, then `node scripts/make-icons.js <png>`. The same SVG is `renderer/assets/app-icon.svg` (empty state). No AI showcase backgrounds were made (the logo skill's image step needs a Gemini API key that is not available here).
+- Animated GIF/WebP: the queue row says "first frame only".
 
 ## 10. Platform and build notes
 - Build host so far: Linux sandbox. Linux `dist:dir` works and the packaged binary was driven through the UI under Xvfb.
@@ -132,23 +136,37 @@ Regression targets (numbers this logic was verified against, re-check after chan
 ## 12. Open items and known quirks (prioritised)
 1. **Not built:** the NSIS `Setup` installers (need Windows or Wine) and the macOS `.dmg`/`.zip` (need a Mac: `./build-mac.sh`). Built here: Windows portable x64/arm64 (unsigned, default icon, never run on Windows).
 2. DirectML and CoreML are untested on real hardware.
-3. Placeholder icon.
+3. Icon is a real mark now (Quad Zoom) but a first pass; a designer may want to refine it.
 4. Installers are unsigned (SmartScreen / Gatekeeper warnings).
 5. Quality model is slow on CPU (~12× Fast); no GPU path has been timed.
 6. Upscalers invent plausible detail (the fixture's small text is visibly reshaped); not faithful restoration.
-7. Huge images are refused (64 MP output cap) instead of streamed.
-8. Animated GIFs use the first frame only.
+7. Output cap is now 256 MP (streamed). Beyond that images are refused with a message; WebP output is limited to 16383 px per side.
+8. Animated GIFs use the first frame only (the queue row now says so); multi-frame upscaling is not implemented.
 9. A mark can only update `renderer/` and `HANDOFF.md`; main-process changes need a new installer.
-10. `npm audit` reports 8 moderate advisories in build-time dependencies (electron-builder tree); not reviewed.
+10. `npm audit` still lists 10 advisories (2 high, 8 moderate). Reviewed: the app-relevant ones are in code that no longer ships; the rest is build tooling (see §7). Re-check after any dependency bump.
 
 ## 13. Rough chronology (why the code looks the way it does)
 1. Browser-page plan rejected; direction set to a native Electron app with real installers, HIG UI and a mark system.
 2. Tiling and blend maths written first as pure code with tests, because seams are the classic tiled-upscaler bug.
 3. Model sources chosen by actually downloading candidates and loading them in onnxruntime (dynamic H/W, license BSD-3, published hash).
 4. Packaging found two bugs the dev run hid (sharp missing, 290 MB of foreign binaries), then the macOS Intel gap in onnxruntime 1.30.
+5. Size cap removed by streaming rows to disk (StripBlender); logo chosen from 8 variants; dead vulnerable install-script dependencies dropped from the bundle.
 
 ## 14. Change log
 Format: `### <date> – <title>` then the four fields **Asked**, **Changed**, **Verified**, **Not done**. Newest first. Mark entries read `### <date> – Mk <Roman> "<title>" – update file` and end with a **Mark file** line.
+
+### 2026-10-20 – Mk II "Logo and first-frame note" – update file
+- **Asked** – Ship the interface changes from the logo and size-cap work as the next update file.
+- **Changed** – Mk II carries `renderer/`: the Quad Zoom app icon in the empty state (`assets/app-icon.svg`), and the "first frame only" note on animated images in the queue. It also carries this HANDOFF.md. The streaming upscaler, the 256 MP cap, the WebP size guard, the new icon files and the smaller bundle live in `electron/` and `build/`, which a mark cannot replace; they need the rebuilt installers.
+- **Verified** – Dry run self-check, real build, then `node scripts/verify-mark-system.js`; the renderer was also loaded in the real packaged app (empty state with logo, upscale, no page errors). The test suite is 12/12.
+- **Not done** – Mk II was not installed on a real Windows or Mac machine, and an old installer that gets Mk II installed on top still has the old 64 MP limit and old icon because those are not hot-swappable.
+- **Mark file:** `marks/out/ImageUpscale-MkII.upscl` (7 files, minimum shell 1.0.0)
+
+### 2026-10-20 – Logo, streaming (256 MP cap), GIF note, audit clean-up of the bundle
+- **Asked** – "/logo-generator and do the rest yourself": make a real logo, then work through the open items list (signing, size cap, GIFs, npm audit, mark limits).
+- **Changed** – `scripts/make-logo.js` + `branding/` (8 variants, showcase, Quad Zoom chosen); `build/icon.*` regenerated, `renderer/assets/app-icon.svg` used in the empty state; `StripBlender` in `electron/tile.js` and streamed PNG encoding in `electron/upscaler.js` (cap 64 → 256 MP, WebP/JPEG dimension guards in `exportImage`); `note: first frame only` for multi-page images in `electron/main.js` and the queue row; `build.files` excludes `adm-zip`, `global-agent`, `roarr`, `sprintf-js` and `onnxruntime-node/script/**`. README/INSTALL/HANDOFF corrected. `scripts/verify-mark-system.js` made generic: it assumed Mk I was the only real mark, so after Mk II shipped its scratch "temporary Mk II" became Mk III and 3 of 21 checks failed on hard-coded names (the system was fine, the script was wrong). Mk II cut (`renderer/` + HANDOFF.md).
+- **Verified** – `npm test` 12/12 (new: StripBlender byte-identical to Blender on noisy data for 4 sizes, animated GIF takes frame 1). 4× / 2× fixture PSNR unchanged (29.4 / 28.8 dB). A 3000×2250 image (12000×9000 = 108 MP output, refused by the old build) upscaled in 81 s with RSS flat at about 407 MB and re-read by sharp as a valid 12000×9000 PNG. Packaged Linux build re-run through the UI after the dependency exclusion: OK, About shows Mk I. Icon checked at 256/64/32/16 px. `node scripts/verify-mark-system.js` 21/21 with Mk I and Mk II both real (first run was 18/21, see Changed).
+- **Not done** – Code signing (needs a paid certificate the owner has to obtain; cannot be done here). Mark limits (a mark can only change `renderer/` and `HANDOFF.md`) are by design, not fixable without a real auto-updater. No multi-frame GIF upscaling. No AI showcase images (no Gemini key). Windows setup `.exe` and macOS `.dmg` still need Windows/Wine and a Mac. Nothing run on real Windows or Mac hardware.
 
 ### 2026-10-18 – Built Windows portable installers, checked the update installer inside the real app, wrote INSTALL.md and README.md
 - **Asked** – Build `dist:win` and `dist:mac`, `ls -lh release/`, report paths and sizes; wire the `.upscl` updater and check it with a temporary Mk II; INSTALL.md and README with real speed numbers and limits.

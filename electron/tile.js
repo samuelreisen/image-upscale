@@ -83,6 +83,83 @@ class Blender {
   }
 }
 
+
+// Same maths as Blender, but memory stays at one tile row. Tiles must be added in planTiles() order
+// (row by row). Once a tile row is done, every output row above the next tile row's start can no longer
+// change, so those rows are converted and handed to `sink(rows, startRow, count)` (interleaved RGB bytes,
+// ascending) and dropped. This lifts the output size limit from RAM to disk.
+class StripBlender {
+  constructor(width, height, scale, overlap, tileSize, sink) {
+    this.W = width * scale;
+    this.H = height * scale;
+    this.scale = scale;
+    this.ramp = overlap * scale;
+    this.srcW = width;
+    this.srcH = height;
+    this.sink = sink;
+    this.cap = tileSize * scale; // output rows one tile row can span
+    this.acc = new Float32Array(3 * this.W * this.cap);
+    this.wsum = new Float32Array(this.W * this.cap);
+    this.base = 0; // first output row still held in the buffer
+    this.rowY = null; // source y of the tile row being filled
+  }
+
+  add(tile, data) {
+    if (this.rowY !== null && tile.y !== this.rowY) this._endRow(tile.y);
+    this.rowY = tile.y;
+    const s = this.scale;
+    const tw = tile.w * s;
+    const th = tile.h * s;
+    const ox = tile.x * s;
+    const oy = tile.y * s - this.base;
+    if (oy < 0 || oy + th > this.cap) throw new Error('tiles added out of order');
+    const atL = tile.x === 0;
+    const atR = tile.x + tile.w >= this.srcW;
+    const atT = tile.y === 0;
+    const atB = tile.y + tile.h >= this.srcH;
+    const plane = this.W * this.cap;
+    for (let y = 0; y < th; y++) {
+      const wy = edgeWeight(y, th, this.ramp, atT, atB);
+      for (let x = 0; x < tw; x++) {
+        const w = wy * edgeWeight(x, tw, this.ramp, atL, atR);
+        const di = (oy + y) * this.W + (ox + x);
+        this.wsum[di] += w;
+        for (let c = 0; c < 3; c++) this.acc[c * plane + di] += data[c * tw * th + y * tw + x] * w;
+      }
+    }
+    this.lastEnd = tile.y * s + th; // output row just past the last tile of this row
+  }
+
+  // Rows below `limit` (absolute output row) are final: emit them and slide the rest to the top.
+  _flush(limit) {
+    const count = limit - this.base;
+    if (count <= 0) return;
+    const plane = this.W * this.cap;
+    const out = new Uint8ClampedArray(count * this.W * 3);
+    for (let r = 0; r < count; r++) {
+      for (let x = 0; x < this.W; x++) {
+        const i = r * this.W + x;
+        const w = this.wsum[i] || 1;
+        const o = i * 3;
+        for (let c = 0; c < 3; c++) out[o + c] = Math.round((this.acc[c * plane + i] / w) * 255);
+      }
+    }
+    this.sink(out, this.base, count);
+    const keep = this.lastEnd - limit; // rows still needed by the next tile row
+    for (let c = 0; c < 3; c++) {
+      this.acc.copyWithin(c * plane, c * plane + count * this.W, c * plane + (count + keep) * this.W);
+      this.acc.fill(0, c * plane + keep * this.W, (c + 1) * plane);
+    }
+    this.wsum.copyWithin(0, count * this.W, (count + keep) * this.W);
+    this.wsum.fill(0, keep * this.W);
+    this.base = limit;
+  }
+
+  _endRow(nextY) { this._flush(nextY * this.scale); }
+
+  finish() { this._flush(this.H); }
+}
+
 // Halves a planar CHW float image (3 x h x w, w and h even) by averaging 2x2 blocks.
 function boxDown2(data, w, h) {
   const ow = w >> 1;
@@ -101,4 +178,4 @@ function boxDown2(data, w, h) {
   return out;
 }
 
-module.exports = { planTiles, edgeWeight, Blender, boxDown2 };
+module.exports = { planTiles, edgeWeight, Blender, StripBlender, boxDown2 };

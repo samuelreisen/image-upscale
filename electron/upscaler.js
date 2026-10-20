@@ -2,12 +2,16 @@
 // Tiled Real-ESRGAN inference with onnxruntime-node. Runs in the main process.
 const fs = require('fs');
 const sharp = require('sharp');
-const { planTiles, Blender, boxDown2 } = require('./tile');
+const os = require('os');
+const path = require('path');
+const { pipeline } = require('stream/promises');
+const { planTiles, StripBlender, boxDown2 } = require('./tile');
 
 const TILE = 192;
 const OVERLAP = 16;
-// Blender holds 3 float planes + a weight plane: 16 bytes per output pixel.
-const MAX_OUTPUT_PIXELS = 64e6;
+// Rows are streamed to disk, so the limit is disk space (3 bytes per output pixel as a temp file) and
+// libvips/PNG limits, not RAM. 256 MP is 16384 x 16384.
+const MAX_OUTPUT_PIXELS = 256e6;
 
 function lazyOrt() {
   return require('onnxruntime-node');
@@ -59,15 +63,21 @@ class Upscaler {
   }
 
   // rgb: interleaved Uint8 RGB, width x height. scale: 2 or 4.
-  // Returns interleaved Uint8ClampedArray RGB of (width*scale) x (height*scale).
-  async upscaleRgb(rgb, width, height, { scale = 4, onProgress, signal } = {}) {
+  // With `sink(rows, startRow, count)` finished output rows (interleaved RGB bytes) are streamed to it in order
+  // and nothing large is kept. Without a sink the whole result is returned as a Uint8ClampedArray (small images, tests).
+  async upscaleRgb(rgb, width, height, { scale = 4, onProgress, signal } = {}, sink = null) {
     if (scale !== 2 && scale !== 4) throw new Error('Scale must be 2x or 4x.');
     if (width * scale * height * scale > MAX_OUTPUT_PIXELS) {
       const mp = Math.floor(MAX_OUTPUT_PIXELS / 1e6 / (scale * scale));
       throw new Error(`This image is too large for ${scale}x on this app (limit about ${mp} megapixels input). Crop or shrink it first.`);
     }
     const tiles = planTiles(width, height, TILE, OVERLAP);
-    const blender = new Blender(width, height, scale, OVERLAP);
+    let whole = null;
+    if (!sink) {
+      whole = new Uint8ClampedArray(width * scale * height * scale * 3);
+      sink = (rows, start) => whole.set(rows, start * width * scale * 3);
+    }
+    const blender = new StripBlender(width, height, scale, OVERLAP, TILE, sink);
     let done = 0;
     for (const t of tiles) {
       if (signal && signal.aborted) throw Object.assign(new Error('Cancelled.'), { name: 'AbortError' });
@@ -93,7 +103,8 @@ class Upscaler {
       done++;
       if (onProgress) onProgress(done, tiles.length);
     }
-    return blender.finish();
+    blender.finish();
+    return whole;
   }
 }
 
@@ -108,26 +119,47 @@ async function decodeImage(file) {
   return { rgb: data, alpha, width: info.width, height: info.height };
 }
 
-// Full pipeline: file in, PNG file out. Returns { outPath, width, height, provider, ms }.
+// Full pipeline: file in, PNG file out. Output rows go to a temp raw file as they finish, then sharp
+// encodes the PNG from that stream, so memory does not grow with the output size.
+// Returns { outPath, width, height, provider, ms }.
 async function upscaleFile(upscaler, inPath, outPath, { scale = 4, onProgress, signal } = {}) {
   const t0 = Date.now();
   const img = await decodeImage(inPath);
-  const rgb = await upscaler.upscaleRgb(img.rgb, img.width, img.height, { scale, onProgress, signal });
   const W = img.width * scale;
   const H = img.height * scale;
-  let pipeline = sharp(Buffer.from(rgb.buffer, rgb.byteOffset, rgb.byteLength), { raw: { width: W, height: H, channels: 3 } });
-  if (img.alpha) {
-    const a = await sharp(img.alpha, { raw: { width: img.width, height: img.height, channels: 1 } })
-      .resize(W, H, { kernel: 'lanczos3' }).raw().toBuffer();
-    pipeline = pipeline.joinChannel(a, { raw: { width: W, height: H, channels: 1 } });
+  const rawPath = path.join(os.tmpdir(), `upscl-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.raw`);
+  const fd = fs.openSync(rawPath, 'w');
+  try {
+    await upscaler.upscaleRgb(img.rgb, img.width, img.height, { scale, onProgress, signal },
+      (rows) => { fs.writeSync(fd, rows); });
+    fs.closeSync(fd);
+    let enc = sharp({ raw: { width: W, height: H, channels: 3 }, limitInputPixels: false });
+    if (img.alpha) {
+      const a = await sharp(img.alpha, { raw: { width: img.width, height: img.height, channels: 1 } })
+        .resize(W, H, { kernel: 'lanczos3' }).raw().toBuffer();
+      enc = enc.joinChannel(a, { raw: { width: W, height: H, channels: 1 } });
+    }
+    await pipeline(fs.createReadStream(rawPath), enc.png({ compressionLevel: 3 }), fs.createWriteStream(outPath));
+  } catch (e) {
+    try { fs.closeSync(fd); } catch { /* already closed */ }
+    fs.rmSync(outPath, { force: true });
+    throw e;
+  } finally {
+    fs.rmSync(rawPath, { force: true });
   }
-  await pipeline.png({ compressionLevel: 3 }).toFile(outPath);
   return { outPath, width: W, height: H, provider: upscaler.provider, ms: Date.now() - t0 };
 }
 
 // Re-encode a finished PNG into the chosen format.
 async function exportImage(pngPath, outPath, format, quality = 92) {
-  const img = sharp(pngPath);
+  const img = sharp(pngPath, { limitInputPixels: false });
+  const { width, height } = await img.metadata();
+  if (format === 'webp' && Math.max(width, height) > 16383) {
+    throw new Error(`WebP cannot hold ${width} × ${height} px (limit is 16383 on each side). Save as PNG or JPEG instead.`);
+  }
+  if (format === 'jpeg' && Math.max(width, height) > 65535) {
+    throw new Error(`JPEG cannot hold ${width} × ${height} px. Save as PNG instead.`);
+  }
   if (format === 'png') await img.png({ compressionLevel: 6 }).toFile(outPath);
   else if (format === 'jpeg') await img.flatten({ background: '#ffffff' }).jpeg({ quality, mozjpeg: true }).toFile(outPath);
   else if (format === 'webp') await img.webp({ quality }).toFile(outPath);

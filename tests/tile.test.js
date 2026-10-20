@@ -64,3 +64,28 @@ test('model verification accepts the exact file and rejects a changed byte', asy
   assert.equal(await isVerified(model, f), false);
   assert.equal(await isVerified(model, path.join(dir, 'missing.onnx')), false);
 });
+
+test('StripBlender output is byte-identical to Blender while holding one tile row', () => {
+  const { StripBlender } = require('../electron/tile');
+  for (const [W, H, S] of [[300, 200, 2], [193, 500, 4], [100, 80, 2], [420, 450, 2]]) {
+    const ref = new Blender(W, H, S, 16);
+    const got = new Uint8ClampedArray(W * S * H * S * 3);
+    let nextRow = 0;
+    const strip = new StripBlender(W, H, S, 16, 192, (rows, start, count) => {
+      assert.equal(start, nextRow, 'rows arrive in order with no gaps');
+      got.set(rows, start * W * S * 3);
+      nextRow += count;
+    });
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (const t of planTiles(W, H, 192, 16)) {
+      const tw = t.w * S, th = t.h * S, d = new Float32Array(3 * tw * th);
+      for (let i = 0; i < d.length; i++) d[i] = rnd(); // noisy on purpose: any mis-weighted overlap shows
+      ref.add(t, d);
+      strip.add(t, d);
+    }
+    strip.finish();
+    assert.equal(nextRow, H * S, `all rows emitted for ${W}x${H}`);
+    assert.deepEqual(Buffer.from(got), Buffer.from(ref.finish()), `identical for ${W}x${H} x${S}`);
+  }
+});

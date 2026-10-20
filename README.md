@@ -39,11 +39,11 @@ Quality is about 12 times slower than Fast on a CPU. The 3 MP column is extrapol
 
 - **Upscalers invent detail.** The result is plausible, not a faithful restoration. Small text, faces and fine patterns can be reshaped (the test image's tiny text visibly changes). Do not use it where accuracy matters.
 - **Quality is big and slow on CPU.** Fast is the default for that reason.
-- **Size cap:** output is limited to 64 megapixels (about 4 MP input at 4×, 16 MP at 2×), because the tile blender holds the whole result in memory.
+- **Size cap:** output is limited to 256 megapixels (about 16 MP input at 4×, 64 MP at 2×). Rows are streamed to disk, so memory stays flat (a 108 MP output used about 400 MB of RAM and took 81 s on the Fast model). WebP saves are limited to 16383 px per side.
 - **Installers are unsigned.** Expect SmartScreen on Windows and Gatekeeper on macOS (see INSTALL.md).
-- **Animated GIFs** are upscaled from their first frame only.
+- **Animated GIFs** are upscaled from their first frame only (the queue says so).
 - **Update files** can replace the interface (`renderer/`) and `HANDOFF.md`, not the main-process code.
-- **Build status:** only the Windows portable `.exe` files (x64, arm64, combined) have been built, on Linux, with the default Electron icon, and have not been run on Windows. The Windows setup installer and the macOS `.dmg` are not built (they need Windows/Wine and a Mac). The app icon is a placeholder.
+- **Build status:** only the Windows portable `.exe` files (x64, arm64, combined) have been built, on Linux, with the default Electron icon, and have not been run on Windows. The Windows setup installer and the macOS `.dmg` are not built (they need Windows/Wine and a Mac). The icon is a first-pass mark, not a designer's final.
 
 ## Develop
 

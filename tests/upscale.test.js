@@ -52,5 +52,20 @@ test('cancel stops between tiles', { skip }, async () => {
 
 test('refuses images that would exhaust memory', { skip }, async () => {
   const up = await new Upscaler(model).open(true);
-  await assert.rejects(up.upscaleRgb(Buffer.alloc(3), 5000, 5000, { scale: 4 }), /too large/);
+  await assert.rejects(up.upscaleRgb(Buffer.alloc(3), 9000, 9000, { scale: 4 }), /too large/);
+});
+
+test('animated GIF: detected as multi-frame, only the first frame is upscaled', { skip }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'upscl-gif-'));
+  const gif = path.join(dir, 'anim.gif');
+  const w = 40, h = 30;
+  const frames = Buffer.concat([Buffer.alloc(w * h * 3, 40), Buffer.alloc(w * h * 3, 200)]);
+  await sharp(frames, { raw: { width: w, height: h * 2, channels: 3, pageHeight: h } }).gif({ loop: 0, delay: [100, 100] }).toFile(gif);
+  const meta = await sharp(gif).metadata();
+  assert.equal(meta.pages, 2, 'fixture really is animated');
+  const up = await new Upscaler(model).open(true);
+  const out = path.join(dir, 'out.png');
+  const r = await upscaleFile(up, gif, out, { scale: 2 });
+  assert.equal(r.width, w * 2);
+  assert.equal(r.height, h * 2, 'height is one frame, not the stacked frames');
 });

@@ -3,7 +3,7 @@
 // verify-mark-system.js: proves the mark system works on THIS project, in a scratch folder.
 //   node scripts/verify-mark-system.js [--keep]
 // Needs a real Mk I already built (marks/history.json). Never touches the project's own marks or HANDOFF.md:
-// the temporary Mk II is made in a scratch copy, so there is nothing to clean up afterwards.
+// the temporary next mark (Mk II, or Mk III once Mk II exists, and so on) is made in a scratch copy, so there is nothing to clean up afterwards.
 
 const fs = require('fs');
 const os = require('os');
@@ -57,8 +57,10 @@ const skip = new Set(['node_modules', '.git', 'handoff-history']);
 execFileSync(process.execPath, [path.join(copyProj, 'scripts', 'make-mark.js'), '--title', 'verify temp', '--notes', 'temporary Mk II for verification'], { cwd: copyProj, stdio: 'pipe' });
 const hist2 = JSON.parse(fs.readFileSync(path.join(copyProj, 'marks', 'history.json'), 'utf8'));
 const mk2rec = hist2[hist2.length - 1];
-check('scratch copy produced Mk II', mk2rec.mark === hist2[hist2.length - 2].mark + 1 && mk2rec.name === mp.markName(mk2rec.mark), mk2rec.file);
+check('scratch copy produced a temporary next mark', mk2rec.mark === hist2[hist2.length - 2].mark + 1 && mk2rec.name === mp.markName(mk2rec.mark), mk2rec.file);
 const mk2 = fs.readFileSync(path.join(copyProj, mk2rec.file));
+const tmpNo = mk2rec.mark; // the temporary mark's number; it is Mk II only while Mk I is the sole real mark
+const tmpName = mp.markName(tmpNo);
 
 // 4. install into a scratch target that already has an old HANDOFF.md (stamp 0)
 const target = path.join(scratch, 'installed');
@@ -74,13 +76,13 @@ check('old copy landed in handoff-history/', hh().length === 1 && /^HANDOFF-MkI-
 check('backup holds the old text', fs.readFileSync(path.join(target, 'handoff-history', hh()[0]), 'utf8') === oldDoc);
 
 r = installMark(mk2, target, { config: cfg });
-check('HANDOFF.md replaced when incoming Mk II is newer than Mk I', r.handoff.replaced && stampOf() === 2, r.handoff.reason);
+check('HANDOFF.md replaced when incoming ' + tmpName + ' is newer than Mk I', r.handoff.replaced && stampOf() === tmpNo, r.handoff.reason);
 check('second backup is named was-MkI', hh().length === 2 && hh().some((f) => /-was-MkI\.md$/.test(f)), hh().join(', '));
 
 const before = fs.readFileSync(path.join(target, 'HANDOFF.md'), 'utf8');
 const nBackups = hh().length;
 r = installMark(mk1, target, { config: cfg });
-check('HANDOFF.md NOT replaced when incoming Mk I is older than installed Mk II', !r.handoff.replaced && stampOf() === 2 && fs.readFileSync(path.join(target, 'HANDOFF.md'), 'utf8') === before, r.handoff.reason);
+check('HANDOFF.md NOT replaced when incoming Mk I is older than installed ' + tmpName, !r.handoff.replaced && stampOf() === tmpNo && fs.readFileSync(path.join(target, 'HANDOFF.md'), 'utf8') === before, r.handoff.reason);
 check('no extra backup made for the refused replacement', hh().length === nBackups);
 
 // 5. refusals
@@ -96,7 +98,7 @@ check('file with wrong magic bytes refused', c2 === 'NOT_A_MARK', String(c2));
 const tooNew = mp.packMark({ mark: 99, name: mp.markName(99), title: 't', notes: '', created: new Date().toISOString(), minShell: '999.0.0' }, { 'HANDOFF.md': '<!-- handoff-mark: 99 -->\n' }, { config: cfg });
 const c3 = throwsCode(() => installMark(tooNew, target, { config: cfg }));
 check('file needing a newer shell refused', c3 === 'TOO_NEW', String(c3));
-check('refusals changed nothing in the target', JSON.stringify(fs.readdirSync(target).sort()) === snapshot && stampOf() === 2);
+check('refusals changed nothing in the target', JSON.stringify(fs.readdirSync(target).sort()) === snapshot && stampOf() === tmpNo);
 
 // 6. the real project was not touched
 check('real marks/history.json unchanged', fs.readFileSync(histPath, 'utf8') === historyBefore);

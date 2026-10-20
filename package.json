@@ -23,7 +23,8 @@
     "predist:dir": "node scripts/fetch-models.js fast",
     "dist:dir": "electron-builder --linux dir --x64 --publish never",
     "dist:win:portable": "electron-builder --win portable --x64 --arm64 --publish never -c.win.signAndEditExecutable=false -c.win.target=portable",
-    "predist:win:portable": "node scripts/cross-deps.js win && node scripts/fetch-models.js fast"
+    "predist:win:portable": "node scripts/cross-deps.js win && node scripts/fetch-models.js fast",
+    "logo": "node scripts/make-logo.js"
   },
   "build": {
     "appId": "com.samuelreisen.imageupscale",
@@ -48,7 +49,12 @@
       "build/icon.png",
       "HANDOFF.md",
       "mark.json",
-      "package.json"
+      "package.json",
+      "!node_modules/adm-zip/**",
+      "!node_modules/global-agent/**",
+      "!node_modules/roarr/**",
+      "!node_modules/sprintf-js/**",
+      "!node_modules/onnxruntime-node/script/**"
     ],
     "extraResources": [
       {

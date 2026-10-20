@@ -45,7 +45,7 @@ That produces `release/ImageUpscale-1.0.0-universal.dmg` (Intel and Apple Silico
 
 **Fast** is built in and is the right choice for most photos. **Quality** is sharper on some images but about 12 times slower on a CPU. Choosing it offers a one-time 64 MB download, which can be paused and resumed.
 
-Very large images are refused with a message. Crop or shrink them first (limit is about 4 megapixels at 4×, 16 megapixels at 2×).
+Very large images are refused with a message. Crop or shrink them first (limit is about 16 megapixels at 4×, 64 megapixels at 2×). Big images work but take a while: the Fast model needs roughly 15 seconds per megapixel on an ordinary CPU.
 
 ## Update files (`.upscl`)
 

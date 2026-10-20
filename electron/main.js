@@ -71,7 +71,7 @@ function isImagePath(p) {
 }
 
 async function dataUrl(file, maxEdge) {
-  const buf = await sharp(file, { failOn: 'none' }).rotate()
+  const buf = await sharp(file, { failOn: 'none', limitInputPixels: false }).rotate()
     .resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true })
     .webp({ quality: 90 }).toBuffer();
   return `data:image/webp;base64,${buf.toString('base64')}`;
@@ -89,6 +89,7 @@ async function addPaths(paths) {
         id: nextId++, path: p, name: path.basename(p),
         width: rotated ? meta.height : meta.width, height: rotated ? meta.width : meta.height,
         status: 'ready', resultPath: null, scale: null,
+        note: meta.pages > 1 ? 'first frame only' : null, // animated GIF/WebP: only frame 1 is upscaled
       };
       items.set(item.id, item);
       added.push({ ...publicItem(item), thumb: await dataUrl(p, 120) });
@@ -99,7 +100,7 @@ async function addPaths(paths) {
   return { added, problems };
 }
 
-const publicItem = (i) => ({ id: i.id, name: i.name, width: i.width, height: i.height, status: i.status, scale: i.scale, error: i.error || null });
+const publicItem = (i) => ({ id: i.id, name: i.name, width: i.width, height: i.height, status: i.status, scale: i.scale, error: i.error || null, note: i.note || null });
 
 // ---------- window and menu ----------
 function createWindow() {

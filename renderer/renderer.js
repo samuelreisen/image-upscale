@@ -44,8 +44,8 @@ const fmtMB = (b) => `${(b / 1048576).toFixed(0)} MB`;
 function itemMeta(it) {
   if (it.status === 'error') return { text: it.error || 'Could not upscale this image.', err: true };
   if (it.status === 'working') return { text: it.pct != null ? `Upscaling… ${it.pct}%` : 'Upscaling…' };
-  if (isDoneNow(it)) return { text: `Done · ${it.width * it.outScale} × ${it.height * it.outScale}` };
-  return { text: `${it.width} × ${it.height}` };
+  if (isDoneNow(it)) return { text: `Done · ${it.width * it.outScale} × ${it.height * it.outScale}${it.note ? ` · ${it.note}` : ''}` };
+  return { text: `${it.width} × ${it.height}${it.note ? ` · ${it.note}` : ''}` };
 }
 
 function renderQueue() {

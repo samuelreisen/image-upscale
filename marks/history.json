@@ -10,5 +10,17 @@
     "bytes": 22268,
     "minShell": "1.0.0",
     "handoff": true
+  },
+  {
+    "mark": 2,
+    "name": "Mk II",
+    "title": "Logo and first-frame note",
+    "notes": "Quad Zoom icon in empty state, animated image note",
+    "created": "2026-10-20T16:26:37.458Z",
+    "file": "marks/out/ImageUpscale-MkII.upscl",
+    "sha256": "703e03ddad52a44e4b0db0fcb5b74b79a6ad4ec2ef8bbaaf686006e016a332ab",
+    "bytes": 25219,
+    "minShell": "1.0.0",
+    "handoff": true
   }
 ]
