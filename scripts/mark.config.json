@@ -1,9 +1,0 @@
-{
-  "project": "ImageUpscale",
-  "ext": ".upscl",
-  "previousExts": [],
-  "shellVersion": "1.0.0",
-  "minShell": "1.0.0",
-  "include": ["renderer", "HANDOFF.md"],
-  "exclude": ["node_modules", ".git", "marks", "handoff-history", "*.log", ".DS_Store"]
-}
